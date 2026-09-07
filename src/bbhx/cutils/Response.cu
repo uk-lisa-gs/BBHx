@@ -83,20 +83,23 @@ d_Gslr_holder d_EvaluateGslr(double t, double f, cmplx *H, double *k, int respon
     double *n = &n_all[0];
 
 #endif
+    // Orbits supplies absolute SSB positions. The link phase below uses
+    // positions relative to p0: factorcexp0 restores the common orbital phase.
+    // Without this subtraction the barycentre delay is counted twice.
     Vec tmp = orbits->get_pos(t, 1);
-    p1L[0] = tmp.x;
-    p1L[1] = tmp.y;
-    p1L[2] = tmp.z;
+    p1L[0] = tmp.x - p0[0];
+    p1L[1] = tmp.y - p0[1];
+    p1L[2] = tmp.z - p0[2];
 
     tmp = orbits->get_pos(t, 2);
-    p2L[0] = tmp.x;
-    p2L[1] = tmp.y;
-    p2L[2] = tmp.z;
+    p2L[0] = tmp.x - p0[0];
+    p2L[1] = tmp.y - p0[1];
+    p2L[2] = tmp.z - p0[2];
 
     tmp = orbits->get_pos(t, 3);
-    p3L[0] = tmp.x;
-    p3L[1] = tmp.y;
-    p3L[2] = tmp.z;
+    p3L[0] = tmp.x - p0[0];
+    p3L[1] = tmp.y - p0[1];
+    p3L[2] = tmp.z - p0[2];
 
     // n1
     // TODO: need to check this
