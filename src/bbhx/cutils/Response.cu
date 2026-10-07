@@ -101,9 +101,11 @@ d_Gslr_holder d_EvaluateGslr(double t, double f, cmplx *H, double *k, int respon
     p3L[1] = tmp.y - p0[1];
     p3L[2] = tmp.z - p0[2];
 
+    // lisatools defines n_ij = (p_i - p_j) / L (receiver minus emitter).
+    // The Gslr below follow lisabeta: n1 = (p3 - p2)/L, n2 = (p1 - p3)/L,
+    // n3 = (p2 - p1)/L, i.e. links 32, 13 and 21.
     // n1
-    // TODO: need to check this
-    tmp = orbits->get_normal_unit_vec(t, 12);
+    tmp = orbits->get_normal_unit_vec(t, 32);
     n[0] = tmp.x;
     n[1] = tmp.y;
     n[2] = tmp.z;
@@ -112,7 +114,7 @@ d_Gslr_holder d_EvaluateGslr(double t, double f, cmplx *H, double *k, int respon
     cmplx n1Hn1 = d_vec_H_vec_product(n, H, n); // np.dot(n1, np.dot(H, n1))
 
     // n2
-    tmp = orbits->get_normal_unit_vec(t, 23);
+    tmp = orbits->get_normal_unit_vec(t, 13);
     n[0] = tmp.x;
     n[1] = tmp.y;
     n[2] = tmp.z;
@@ -124,7 +126,7 @@ d_Gslr_holder d_EvaluateGslr(double t, double f, cmplx *H, double *k, int respon
     cmplx n2Hn2 = d_vec_H_vec_product(n, H, n); // np.dot(n1, np.dot(H, n1))
 
     // n3
-    tmp = orbits->get_normal_unit_vec(t, 31);
+    tmp = orbits->get_normal_unit_vec(t, 21);
     n[0] = tmp.x;
     n[1] = tmp.y;
     n[2] = tmp.z;
