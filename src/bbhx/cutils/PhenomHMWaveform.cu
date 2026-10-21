@@ -2552,7 +2552,13 @@ void get_phase(int i, double *phase, double *tf, double freq_geom, int ell, int 
     }
 
     Mf = freq_geom;
-    phase_term1 = -t0 * (Mf - pHM->Mf_ref);
+    // London et al., arXiv:1708.00404, write the phase mapping with kappa
+    // in Eq. (3). In the inspiral, Eq. (5) gives f_22(f) = 2*f/m, so
+    // Eq. (6), kappa = 1/f_22'(f), implies kappa = m/2; Eq. (7) fixes
+    // the mode offsets. The paper does not explicitly give this alignment
+    // correction: the m/2 factor on the reference-phase compensation below
+    // is derived by requiring the common time shift to preserve that mapping.
+    phase_term1 = -t0 * (Mf - 0.5 * mm * pHM->Mf_ref);
     phase_term2 = phase_i - (mm * phi0);
 
     *phase = (phase_term1 + phase_term2);
