@@ -54,6 +54,13 @@ class PhenomHMAmpPhase(BBHxParallelModule):
             not shift the tf correspondence so that the response
             is still accurately reflected. (Default: ``0.0``)
 
+        legacy_harmonic_phase (bool, optional): If ``True``, retain the original
+            mode-independent reference-phase compensation for existing data
+            generated with that convention (e.g. Sangria). If ``False``, scale
+            the compensation by ``m/2`` to preserve relative harmonic phases.
+            This does not change amplitudes, waveform times, or the 22 mode.
+            (Default: ``False``)
+
     Attributes:
         allowable_modes (list): Allowed list of mode tuple pairs ``(l,m)`` for
             the chosen waveform model.
@@ -87,10 +94,12 @@ class PhenomHMAmpPhase(BBHxParallelModule):
         mf_min=1e-4,
         mf_max=0.6,
         initial_t_val=0.0,
+        legacy_harmonic_phase=False,
     ):
         super().__init__(force_backend=force_backend)
 
         self.run_phenomd = run_phenomd
+        self.legacy_harmonic_phase = legacy_harmonic_phase
 
         self.allowable_modes = [(2, 2), (3, 3), (4, 4), (2, 1), (3, 2), (4, 3)]
 
@@ -480,6 +489,7 @@ class PhenomHMAmpPhase(BBHxParallelModule):
             self.fringdown,
             self.fdamp,
             self.run_phenomd,
+            self.legacy_harmonic_phase,
         )
 
         # adjust phases based on shift from t_ref

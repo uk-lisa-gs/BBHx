@@ -267,6 +267,7 @@ typedef struct tagPhenomHMStorage
     double f_ref;
     double Mf_ref; /**< reference frequnecy in geometric units */
     double phi_ref;
+    int legacy_harmonic_phase; /**< Retain the original harmonic phase compensation. */
     unsigned int freq_is_uniform; /**< If = 1 then assume uniform spaced, If = 0 then assume arbitrarily spaced. */
     int npts;           /**< number of points in waveform array */
     int nmodes;           /**< number of modes */
@@ -367,7 +368,8 @@ void waveform_amp_phase(
     int numBinAll,
     double* Mf_RD_lm_all,
     double* Mf_DM_lm_all,
-    int run_phenomd
+    int run_phenomd,
+    int legacy_harmonic_phase
 );
 
 #endif // __PHENOMHM__

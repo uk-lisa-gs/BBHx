@@ -22,7 +22,8 @@ cdef extern from "PhenomHMWaveform.hh":
         int numBinAll,
         double* Mf_RD_lm_all,
         double* Mf_DM_lm_all,
-        int run_phenomd
+        int run_phenomd,
+        int legacy_harmonic_phase
     )
 
     void get_phenomhm_ringdown_frequencies_wrap(
@@ -75,7 +76,8 @@ def waveform_amp_phase_wrap(*args, **kwargs):
         numBinAll,
         Mf_RD_lm_all,
         Mf_DM_lm_all,
-        run_phenomd
+        run_phenomd,
+        legacy_harmonic_phase
     ), tkwargs = wrapper(*args, **kwargs)
 
     cdef size_t waveformOut_in = waveformOut
@@ -108,7 +110,8 @@ def waveform_amp_phase_wrap(*args, **kwargs):
         numBinAll,
         <double*> Mf_RD_lm_all_in,
         <double*> Mf_DM_lm_all_in,
-        run_phenomd
+        run_phenomd,
+        legacy_harmonic_phase
     )
 
     return

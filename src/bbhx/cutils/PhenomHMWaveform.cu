@@ -2558,7 +2558,9 @@ void get_phase(int i, double *phase, double *tf, double freq_geom, int ell, int 
     // the mode offsets. The paper does not explicitly give this alignment
     // correction: the m/2 factor on the reference-phase compensation below
     // is derived by requiring the common time shift to preserve that mapping.
-    phase_term1 = -t0 * (Mf - 0.5 * mm * pHM->Mf_ref);
+    // Legacy mode retains the original compensation for existing data.
+    double reference_scale = pHM->legacy_harmonic_phase ? 1.0 : 0.5 * mm;
+    phase_term1 = -t0 * (Mf - reference_scale * pHM->Mf_ref);
     phase_term2 = phase_i - (mm * phi0);
 
     *phase = (phase_term1 + phase_term2);
@@ -2694,7 +2696,8 @@ void IMRPhenomHMCore(
     double cshift[],
     double *Mf_RD_lm,
     double *Mf_DM_lm,
-    int run_phenomd)
+    int run_phenomd,
+    int legacy_harmonic_phase)
 {
 
     // TODO: run_phenomd int -> bool
@@ -2715,6 +2718,7 @@ void IMRPhenomHMCore(
         chi2z,
         f_ref,
         phi_ref);
+    pHM->legacy_harmonic_phase = legacy_harmonic_phase;
 
     /* populate the ringdown frequency array */
     /* If you want to model a new mode then you have to add it here. */
@@ -2912,7 +2916,8 @@ void IMRPhenomHM(
     int numBinAll,
     double *Mf_RD_lm_all,
     double *Mf_DM_lm_all,
-    int run_phenomd)
+    int run_phenomd,
+    int legacy_harmonic_phase)
 {
 
     /*
@@ -2997,7 +3002,7 @@ void IMRPhenomHM(
         }
         CUDA_SYNC_THREADS;
 
-        IMRPhenomHMCore(ells, mms, amps, phases, tf, freqs, m1_SI[binNum], m2_SI[binNum], chi1z[binNum], chi2z[binNum], distance[binNum], f_ref[binNum], length, numModes, binNum, numBinAll, cShift, Mf_RD_lm, Mf_DM_lm, run_phenomd);
+        IMRPhenomHMCore(ells, mms, amps, phases, tf, freqs, m1_SI[binNum], m2_SI[binNum], chi1z[binNum], chi2z[binNum], distance[binNum], f_ref[binNum], length, numModes, binNum, numBinAll, cShift, Mf_RD_lm, Mf_DM_lm, run_phenomd, legacy_harmonic_phase);
     }
 }
 
@@ -3017,7 +3022,8 @@ void waveform_amp_phase(
     int numBinAll,
     double *Mf_RD_lm_all,
     double *Mf_DM_lm_all,
-    int run_phenomd)
+    int run_phenomd,
+    int legacy_harmonic_phase)
 {
 
     double *amps = &waveformOut[0];
@@ -3052,7 +3058,8 @@ void waveform_amp_phase(
         numBinAll,
         Mf_RD_lm_all,
         Mf_DM_lm_all,
-        run_phenomd);
+        run_phenomd,
+        legacy_harmonic_phase);
 
     cudaDeviceSynchronize();
     gpuErrchk(cudaGetLastError());
@@ -3076,7 +3083,8 @@ void waveform_amp_phase(
         numBinAll,
         Mf_RD_lm_all,
         Mf_DM_lm_all,
-        run_phenomd);
+        run_phenomd,
+        legacy_harmonic_phase);
 #endif
 
     /*
