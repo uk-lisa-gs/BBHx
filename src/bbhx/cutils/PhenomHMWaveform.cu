@@ -337,6 +337,18 @@ int TaylorF2AlignedPhasing(
 ///////////////////////////////////////////////////////////////////////////////
 
 /**
+ * sqrt(1 - 4 eta) = |m1 - m2| / M, clamped at zero: for near-equal masses,
+ * rounding in m1 * m2 / M^2 can give eta slightly above 1/4, and an unguarded
+ * square root then returns NaN (e.g. a NaN final spin indexes outside the
+ * ringdown spline tables, an illegal memory access on the GPU).
+ */
+CUDA_CALLABLE_MEMBER
+double sqrt_one_minus_four_eta(double eta)
+{
+    return sqrt(fmax(0.0, 1.0 - 4.0 * eta));
+}
+
+/**
  * PN reduced spin parameter
  * See Eq 5.9 in http://arxiv.org/pdf/1107.1267v2.pdf
  */
@@ -344,7 +356,7 @@ CUDA_CALLABLE_MEMBER
 double chiPN(double eta, double chi1, double chi2)
 {
     // Convention m1 >= m2 and chi1 is the spin on m1
-    double delta = sqrt(1.0 - 4.0 * eta);
+    double delta = sqrt_one_minus_four_eta(eta);
     double chi_s = (chi1 + chi2) / 2.0;
     double chi_a = (chi1 - chi2) / 2.0;
     return chi_s * (1.0 - eta * 76.0 / 113.0) + delta * chi_a;
@@ -465,7 +477,7 @@ int init_amp_ins_prefactors(AmpInsPrefactors *prefactors, IMRPhenomDAmplitudeCoe
 
     double Pi = PI;
     double Pi2 = powers_of_pi.two;
-    double Seta = sqrt(1.0 - 4.0 * eta);
+    double Seta = sqrt_one_minus_four_eta(eta);
 
     prefactors->two_thirds = ((-969 + 1804 * eta) * powers_of_pi.two_thirds) / 672.;
     prefactors->one = ((chi1 * (81 * (1 + Seta) - 44 * eta) + chi2 * (81 - 81 * Seta - 44 * eta)) * Pi) / 48.;
@@ -500,7 +512,7 @@ double DAmpInsAnsatz(double Mf, IMRPhenomDAmplitudeCoefficients *p)
     double Mf2 = Mf * Mf;
     double Pi = PI;
     double Pi2 = Pi * Pi;
-    double Seta = sqrt(1.0 - 4.0 * eta);
+    double Seta = sqrt_one_minus_four_eta(eta);
 
     return ((-969 + 1804 * eta) * pow(Pi, 2.0 / 3.0)) / (1008. * pow(Mf, 1.0 / 3.0)) + ((chi1 * (81 * (1 + Seta) - 44 * eta) + chi2 * (81 - 81 * Seta - 44 * eta)) * Pi) / 48. + ((-27312085 - 10287648 * chi22 - 10287648 * chi12 * (1 + Seta) + 10287648 * chi22 * Seta + 24 * (-1975055 + 857304 * chi12 - 994896 * chi1 * chi2 + 857304 * chi22) * eta + 35371056 * eta2) * pow(Mf, 1.0 / 3.0) * pow(Pi, 4.0 / 3.0)) / 6.096384e6 + (5 * pow(Mf, 2.0 / 3.0) * pow(Pi, 5.0 / 3.0) * (chi2 * (-285197 * (-1 + Seta) + 4 * (-91902 + 1579 * Seta) * eta - 35632 * eta2) + chi1 * (285197 * (1 + Seta) - 4 * (91902 + 1579 * Seta) * eta - 35632 * eta2) + 42840 * (-1 + 4 * eta) * Pi)) / 96768. - (Mf * Pi2 * (-336 * (-3248849057.0 + 2943675504 * chi12 - 3339284256 * chi1 * chi2 + 2943675504 * chi22) * eta2 - 324322727232 * eta3 - 7 * (-177520268561 + 107414046432 * chi22 + 107414046432 * chi12 * (1 + Seta) - 107414046432 * chi22 * Seta + 11087290368 * (chi1 + chi2 + chi1 * Seta - chi2 * Seta) * Pi) + 12 * eta * (-545384828789.0 - 176491177632 * chi1 * chi2 + 202603761360 * chi22 + 77616 * chi12 * (2610335 + 995766 * Seta) - 77287373856 * chi22 * Seta + 5841690624 * (chi1 + chi2) * Pi + 21384760320 * Pi2))) / 3.0042980352e10 + (7.0 / 3.0) * pow(Mf, 4.0 / 3.0) * rho1 + (8.0 / 3.0) * pow(Mf, 5.0 / 3.0) * rho2 + 3 * Mf2 * rho3;
 }
@@ -852,7 +864,7 @@ void ComputeIMRPhenomDAmplitudeCoefficients(IMRPhenomDAmplitudeCoefficients *p, 
     p->chi1 = chi1;
     p->chi2 = chi2;
 
-    p->q = (1.0 + sqrt(1.0 - 4.0 * eta) - 2.0 * eta) / (2.0 * eta);
+    p->q = (1.0 + sqrt_one_minus_four_eta(eta) - 2.0 * eta) / (2.0 * eta);
     p->chi = chiPN(eta, chi1, chi2);
 
     p->fRD = fring;
@@ -1267,7 +1279,7 @@ void ComputeIMRPhenomDPhaseCoefficients(IMRPhenomDPhaseCoefficients *p, double e
     p->chi1 = chi1;
     p->chi2 = chi2;
 
-    p->q = (1.0 + sqrt(1.0 - 4.0 * eta) - 2.0 * eta) / (2.0 * eta);
+    p->q = (1.0 + sqrt_one_minus_four_eta(eta) - 2.0 * eta) / (2.0 * eta);
     p->chi = chiPN(eta, chi1, chi2);
 
     p->sigma1 = sigma1Fit(eta, p->chi);
@@ -1700,7 +1712,7 @@ CUDA_CALLABLE_MEMBER
 double FinalSpin0815(double eta, double chi1, double chi2)
 {
     // Convention m1 >= m2
-    double Seta = sqrt(1.0 - 4.0 * eta);
+    double Seta = sqrt_one_minus_four_eta(eta);
     double m1 = 0.5 * (1.0 + Seta);
     double m2 = 0.5 * (1.0 - Seta);
     double m1s = m1 * m1;
@@ -1733,7 +1745,7 @@ CUDA_CALLABLE_MEMBER
 double EradRational0815(double eta, double chi1, double chi2)
 {
     // Convention m1 >= m2
-    double Seta = sqrt(1.0 - 4.0 * eta);
+    double Seta = sqrt_one_minus_four_eta(eta);
     double m1 = 0.5 * (1.0 + Seta);
     double m2 = 0.5 * (1.0 - Seta);
     double m1s = m1 * m1;
@@ -2390,7 +2402,7 @@ double IMRPhenomHMOnePointFiveSpinPN(
     M2 = M2 / (M_INPUT);
     double M = M1 + M2;
     double eta = M1 * M2 / (M * M);
-    double delta = sqrt(1.0 - 4 * eta);
+    double delta = sqrt_one_minus_four_eta(eta);
     double Xs = 0.5 * (X1z + X2z);
     double Xa = 0.5 * (X1z - X2z);
     double ans = 0;
@@ -2457,6 +2469,9 @@ double IMRPhenomHMOnePointFiveSpinPN(
 /** @} */
 /** @} */
 
+// Cap on PN(f_22^A) / PN(2f/m) in get_amp (see there).
+#define PN_RATIO_MAX 10.0
+
 CUDA_CALLABLE_MEMBER
 void get_amp(double *amp, double freq_geom, int ell, int mm, PhenomHMStorage *pHM, UsefulPowers powers_of_f, IMRPhenomDAmplitudeCoefficients *pAmp, AmpInsPrefactors amp_prefactors, double amp0)
 {
@@ -2507,8 +2522,20 @@ void get_amp(double *amp, double freq_geom, int ell, int mm, PhenomHMStorage *pH
         HMamp_term2 = IMRPhenomHMOnePointFiveSpinPN(freq_amp, 2, 2, pHM->m1, pHM->m2, 0.0, 0.0);
     }
 
+    // London et al. (arXiv:1708.00404) Eq. (4) scales the mode by
+    // PN(f) * [PN(f_22^A) / PN(2f/m)] / PN_22(f_22^A). The bracket is exactly 1
+    // in the inspiral (f_22^A = 2f/m) but not in the merger-ringdown, where
+    // |PN_21(2f/m)| can pass through zero: its imaginary part is proportional
+    // to sqrt(1 - 4 eta), so near q = 1 with chi1 != chi2 the (2,1) amplitude
+    // spikes into a narrow spectral line (inherited from LALSuite and
+    // lisabeta). Cap the bracket: it only binds within ~0.01 of q = 1 (all six
+    // modes are unchanged to rounding for q <= 0.97 across masses and spins).
+    double pn_ratio = HMamp_term1 / beta_term2;
+    if (beta_term1 != 0. && !(pn_ratio <= PN_RATIO_MAX))
+        pn_ratio = PN_RATIO_MAX;
+
     // HMamp is computed here
-    amp_i *= beta * HMamp_term1 / HMamp_term2;
+    amp_i *= (beta_term1 == 0. ? 0. : beta_term1 * pn_ratio / HMamp_term2);
 
     *amp = amp_i * amp0;
 }
