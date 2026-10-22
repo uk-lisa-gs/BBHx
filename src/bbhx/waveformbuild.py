@@ -410,11 +410,12 @@ class BBHWaveformFD(BBHxParallelModule):
             t_obs_start (double, optional): Start time of observation in years
                 in the LISA constellation reference frame. This is with reference to :math:`t=0`.
                 (Default: 0.0)
-            t_obs_end (double, optional): End time of observation in years in the
+            t_obs_end (double or np.ndarray, optional): End time of observation in years in the
                 LISA constellation reference frame. This is with reference to :math:`t=0`.
-                (Default: 1.0)
-            t_obs_end_taper (double, optional): If given (years, same frame as
-                ``t_obs_end`` and before it), each harmonic's amplitude is tapered to
+                An array gives one per binary. (Default: 1.0)
+            t_obs_end_taper (double or np.ndarray, optional): If given (years, same
+                frame as ``t_obs_end`` and before it; one per binary if an array, in
+                which case ``t_obs_end`` may be an array too), each harmonic's amplitude is tapered to
                 zero in the frequency domain instead of being cut off at ``t_obs_end``:
                 a Planck taper, linear in frequency, from where that harmonic's
                 :math:`t_f` reaches ``t_obs_end_taper`` to where it reaches
@@ -520,9 +521,12 @@ class BBHWaveformFD(BBHxParallelModule):
         t_start = np.atleast_1d(t_obs_start_SSB)
         t_end = np.atleast_1d(t_obs_end_SSB)
         if t_obs_end_taper is not None:
-            if not 0.0 < t_obs_end_taper < t_obs_end:
+            t_obs_end_taper = np.asarray(t_obs_end_taper, dtype=float)
+            if not np.all((0.0 < t_obs_end_taper) & (t_obs_end_taper < t_obs_end)):
                 raise ValueError("t_obs_end_taper must lie between 0 and t_obs_end.")
-            t_taper = np.atleast_1d(tSSBfromLframe(t_obs_end_taper * YRSID_SI, lam, beta, 0.0))
+            t_taper = np.broadcast_to(
+                tSSBfromLframe(t_obs_end_taper * YRSID_SI, lam, beta, 0.0), (self.num_bin_all,)
+            )
         
         # check if t_obs_start/end are cupy arrays.
         if (

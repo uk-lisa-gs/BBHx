@@ -72,6 +72,20 @@ class BandLimitTest(unittest.TestCase):
         f_gone = frequency_at(self.direct_wave, (4, 4), t_end) * 1.01
         self.assertLess(FREQS[np.flatnonzero(np.abs(interp[0]) > 0)[-1]], f_gone)
 
+    def test_per_binary_taper_matches_separate_calls(self):
+        # Two binaries merging a day apart, each tapered relative to its own merger.
+        wave = BBHWaveformFD(amp_phase_kwargs={"run_phenomd": False}, force_backend="cpu")
+        args = [np.array([p, p]) for p in PARAMS]
+        args[-1] = np.array([T_MERGE, T_MERGE - DAY])
+        t_taper = (args[-1] - 2.0 * DAY) / YRSID_SI
+        t_end = (args[-1] - 0.5 * DAY) / YRSID_SI
+        kw = dict(freqs=FREQS, modes=MODES, fill=True, combine=False, squeeze=False, direct=False, length=4096,
+                  t_obs_start=WINDOW["t_obs_start"])
+        both = wave(*args, t_obs_end_taper=t_taper, t_obs_end=t_end, **kw)
+        for i in range(2):
+            one = wave(*[a[i : i + 1] for a in args], t_obs_end_taper=t_taper[i], t_obs_end=t_end[i], **kw)
+            np.testing.assert_allclose(both[i], one[0], rtol=0, atol=1e-12 * np.abs(one).max())
+
     def test_taper_must_precede_end(self):
         with self.assertRaises(ValueError):
             generate(direct=False, length=1024, t_obs_end_taper=WINDOW["t_obs_end"] * 1.01)
