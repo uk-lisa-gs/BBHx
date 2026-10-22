@@ -188,6 +188,112 @@ void InterpTDI(long *templateChannels_ptrs, double *dataFreqs, double *freqs, do
 #endif
 }
 
+// interpolate straight onto dense data streams, all binaries in one launch
+// grid: (frequency blocks) x (binaries); each thread finds its spline interval
+// in every harmonic's sparse grid by binary search, so no index arrays, streams
+// or per-binary host work are needed. Writes binary bin_i's channels into
+// templateChannels[(bin_i * 3 + channel) * data_length + j] for
+// j in [start_inds[bin_i], start_inds[bin_i] + lengths[bin_i]); other entries
+// are left untouched (zero them beforehand).
+CUDA_KERNEL
+void TDI_dense(cmplx *templateChannels, double *dataFreqs, double *freqsOld, double *propArrays, double *c1In, double *c2In, double *c3In, double *t_start, double *t_end, int old_length, int data_length, int numBinAll, int numModes, int *start_inds, int *lengths)
+{
+    int bin_start, bin_increment;
+#ifdef __CUDACC__
+    bin_start = blockIdx.y;
+    bin_increment = gridDim.y;
+#else
+    bin_start = 0;
+    bin_increment = 1;
+#endif
+    for (int bin_i = bin_start; bin_i < numBinAll; bin_i += bin_increment)
+    {
+        int ind_start = start_inds[bin_i];
+        int ind_length = lengths[bin_i];
+        double t_start_bin = t_start[bin_i];
+        double t_end_bin = t_end[bin_i];
+
+        int start, increment;
+#ifdef __CUDACC__
+        start = blockIdx.x * blockDim.x + threadIdx.x;
+        increment = blockDim.x * gridDim.x;
+#else
+        start = 0;
+        increment = 1;
+#endif
+        for (int i = start; i < ind_length; i += increment)
+        {
+            int j = ind_start + i;
+            double f = dataFreqs[j];
+
+            cmplx trans_complex1 = 0.0;
+            cmplx trans_complex2 = 0.0;
+            cmplx trans_complex3 = 0.0;
+
+            for (int mode_i = 0; mode_i < numModes; mode_i += 1)
+            {
+                double *freqs_mode = &freqsOld[(bin_i * numModes + mode_i) * old_length];
+
+                // index of the last sparse frequency <= f (searchsorted right - 1)
+                int lo = 0;
+                int hi = old_length;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi) / 2;
+                    if (freqs_mode[mid] <= f)
+                        lo = mid + 1;
+                    else
+                        hi = mid;
+                }
+                int ind_here = lo - 1;
+                if ((ind_here <= -1) || (ind_here >= old_length - 1))
+                    continue;
+
+                double x = f - freqs_mode[ind_here];
+                double x2 = x * x;
+                double x3 = x * x2;
+
+                double vals[NUM_INTERPS];
+                for (int k = 0; k < NUM_INTERPS; k += 1)
+                {
+                    int int_shared = ((k * numBinAll + bin_i) * numModes + mode_i) * old_length + ind_here;
+                    vals[k] = propArrays[int_shared] + c1In[int_shared] * x + c2In[int_shared] * x2 + c3In[int_shared] * x3;
+                }
+
+                cmplx channel1(0.0, 0.0);
+                cmplx channel2(0.0, 0.0);
+                cmplx channel3(0.0, 0.0);
+
+                combine_information(&channel1, &channel2, &channel3, vals[0], vals[1], vals[2], cmplx(vals[3], vals[4]), cmplx(vals[5], vals[6]), cmplx(vals[7], vals[8]), t_start_bin, t_end_bin);
+
+                trans_complex1 += channel1;
+                trans_complex2 += channel2;
+                trans_complex3 += channel3;
+            }
+
+            long out = ((long)bin_i * 3) * data_length + j;
+            templateChannels[out] = trans_complex1;
+            templateChannels[out + data_length] = trans_complex2;
+            templateChannels[out + 2 * (long)data_length] = trans_complex3;
+        }
+    }
+}
+
+void InterpTDIDense(cmplx *templateChannels, double *dataFreqs, double *freqs, double *propArrays, double *c1, double *c2, double *c3, double *t_start, double *t_end, int length, int data_length, int numBinAll, int numModes, int *start_inds, int *lengths, int max_length)
+{
+    if ((numBinAll < 1) || (max_length < 1))
+        return;
+#ifdef __CUDACC__
+    int nblocks = (max_length + NUM_THREADS_BUILD - 1) / NUM_THREADS_BUILD;
+    dim3 gridDim(nblocks, numBinAll);
+    TDI_dense<<<gridDim, NUM_THREADS_BUILD>>>(templateChannels, dataFreqs, freqs, propArrays, c1, c2, c3, t_start, t_end, length, data_length, numBinAll, numModes, start_inds, lengths);
+    cudaDeviceSynchronize();
+    gpuErrchk(cudaGetLastError());
+#else
+    TDI_dense(templateChannels, dataFreqs, freqs, propArrays, c1, c2, c3, t_start, t_end, length, data_length, numBinAll, numModes, start_inds, lengths);
+#endif
+}
+
 // directly fill waveform with no interpolation
 // parallel method here is one block per binary
 CUDA_KERNEL

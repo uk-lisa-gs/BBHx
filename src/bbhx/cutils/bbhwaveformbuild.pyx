@@ -10,6 +10,8 @@ cdef extern from "WaveformBuild.hh":
 
     void InterpTDI(long* templateChannels_ptrs, double* dataFreqs, double* freqs, double* propArrays, double* c1, double* c2, double* c3, double* t_start, double* t_end, int length, int data_length, int numBinAll, int numModes, long* inds_ptrs, int* inds_start, int* ind_lengths);
 
+    void InterpTDIDense(cmplx* templateChannels, double* dataFreqs, double* freqs, double* propArrays, double* c1, double* c2, double* c3, double* t_start, double* t_end, int length, int data_length, int numBinAll, int numModes, int* start_inds, int* lengths, int max_length);
+
     void direct_sum(cmplx* templateChannels,
                     double* bbh_buffer,
                     int numBinAll, int data_length, int nChannels, int numModes, double* t_start, double* t_end)
@@ -32,6 +34,24 @@ def InterpTDI_wrap(*args, **kwargs):
     cdef size_t ind_lengths_in = ind_lengths
 
     InterpTDI(<long*> templateChannels_ptrs_in, <double*> dataFreqs_in, <double*> freqs_in, <double*> propArrays_in, <double*> c1_in, <double*> c2_in, <double*> c3_in, <double*> t_start_in, <double*> t_end_in, length, data_length, numBinAll, numModes, <long*> inds_ptrs_in, <int*> inds_start_in, <int*> ind_lengths_in);
+
+
+def InterpTDIDense_wrap(*args, **kwargs):
+    (templateChannels, dataFreqs, freqs, propArrays, c1, c2, c3, t_start, t_end, length, data_length, numBinAll, numModes, start_inds, lengths, max_length), tkwargs = wrapper(*args, **kwargs)
+
+    cdef size_t templateChannels_in = templateChannels
+    cdef size_t dataFreqs_in = dataFreqs
+    cdef size_t freqs_in = freqs
+    cdef size_t propArrays_in = propArrays
+    cdef size_t c1_in = c1
+    cdef size_t c2_in = c2
+    cdef size_t c3_in = c3
+    cdef size_t t_start_in = t_start
+    cdef size_t t_end_in = t_end
+    cdef size_t start_inds_in = start_inds
+    cdef size_t lengths_in = lengths
+
+    InterpTDIDense(<cmplx*> templateChannels_in, <double*> dataFreqs_in, <double*> freqs_in, <double*> propArrays_in, <double*> c1_in, <double*> c2_in, <double*> c3_in, <double*> t_start_in, <double*> t_end_in, length, data_length, numBinAll, numModes, <int*> start_inds_in, <int*> lengths_in, max_length)
 
 
 def direct_sum_wrap(*args, **kwargs):

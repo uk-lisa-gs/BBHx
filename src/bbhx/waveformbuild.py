@@ -350,6 +350,45 @@ class BBHWaveformFD(BBHxParallelModule):
         w = planck_taper_fall(xp.where(apply[..., None], x, -1.0), xp=xp)
         amp *= w
 
+    def _interpolate_dense(self, data_freqs, interp_container, t_start, t_end):
+        """Interpolate all binaries onto ``data_freqs`` in one kernel launch.
+
+        Returns ``(num_bin_all, 3, len(data_freqs))``, zero outside each binary's
+        sparse frequency range. Same result as :class:`TemplateInterpFD` plus the
+        fill loop, without its per-binary host work (index arrays, synchronising
+        slices, allocations and CUDA streams), which dominated on GPUs.
+        """
+        xp = self.xp
+        freqs, y, c1, c2, c3 = interp_container
+        freqs_shaped = freqs.reshape(self.num_bin_all, self.num_modes, -1)
+        data_freqs = xp.ascontiguousarray(xp.asarray(data_freqs, dtype=xp.float64))
+        start = xp.searchsorted(data_freqs, freqs_shaped.min(axis=(1, 2)), side="right")
+        end = xp.searchsorted(data_freqs, freqs_shaped.max(axis=(1, 2)), side="right")
+        start_inds = start.astype(xp.int32)
+        lengths = (end - start).astype(xp.int32)
+        max_length = int(lengths.max()) if self.num_bin_all > 0 else 0
+
+        out = xp.zeros((self.num_bin_all, 3, data_freqs.shape[0]), dtype=xp.complex128)
+        self.backend.InterpTDIDense_wrap(
+            out,
+            data_freqs,
+            freqs,
+            y,
+            c1,
+            c2,
+            c3,
+            xp.asarray(t_start, dtype=xp.float64),
+            xp.asarray(t_end, dtype=xp.float64),
+            self.length,
+            data_freqs.shape[0],
+            self.num_bin_all,
+            self.num_modes,
+            start_inds,
+            lengths,
+            max_length,
+        )
+        return out
+
     @property
     def waveform_gen(self) -> callable:
         """C/CUDA wrapped function for computing waveforms"""
@@ -695,6 +734,10 @@ class BBHWaveformFD(BBHxParallelModule):
                 num_bin_all=self.num_bin_all,
                 force_backend=self.force_backend,
             )
+
+            if fill and not combine:
+                # one kernel launch for all binaries, straight into the output
+                return self._interpolate_dense(freqs, spline.container, t_start, t_end)
 
             # TODO: try single block reduction for likelihood (will probably be worse for smaller batch, but maybe better for larger batch)?
             template_channels = self.interp_response(
