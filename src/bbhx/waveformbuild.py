@@ -29,6 +29,7 @@ from .waveforms.phenomhm import PhenomHMAmpPhase
 from .response.fastfdresponse import LISATDIResponse
 from .utils.transform import tSSBfromLframe, tLfromSSBframe
 from .utils.interpolate import CubicSplineInterpolant
+from .utils.timefrequency import first_crossing_frequency, planck_taper_fall
 from .utils.constants import *
 # from .utils.citations import *
 from .utils.parallelbase import BBHxParallelModule
@@ -323,6 +324,32 @@ class BBHWaveformFD(BBHxParallelModule):
     def supported_backends(cls) -> list:
         return ["bbhx_" + _tmp for _tmp in cls.GPU_RECOMMENDED()]
 
+    def _taper_harmonics(self, out_buffer, t_taper, t_end):
+        """Planck-taper each harmonic's amplitude between f(t_taper) and f(t_end), in place.
+
+        ``out_buffer`` holds amplitude, phase and :math:`t_f` (first three
+        parameters) at ``self.amp_phase_gen.freqs``: the dense frequencies with the
+        direct path, the sparse grid (already ending at ``t_end``) otherwise.
+        """
+        xp = self.xp
+        shape = (self.num_bin_all, self.num_modes, self.length)
+        n = self.num_bin_all * self.num_modes * self.length
+        amp = out_buffer[:n].reshape(shape)
+        tf = out_buffer[2 * n : 3 * n].reshape(shape)
+        freqs = self.amp_phase_gen.freqs.reshape(shape)
+
+        bounds = lambda t: xp.broadcast_to(xp.asarray(t)[:, None], shape[:2])  # noqa: E731
+        f_lo, has_lo = first_crossing_frequency(freqs, tf, bounds(t_taper), xp=xp)
+        # 1 s of slack: the sparse grid's top point sits on t_end itself
+        f_hi, has_hi = first_crossing_frequency(freqs, tf, bounds(t_end) - 1.0, xp=xp)
+        f_peak = xp.take_along_axis(freqs, xp.argmax(tf, axis=-1)[..., None], axis=-1)[..., 0]
+        f_hi = xp.where(has_hi, f_hi, f_peak)
+        apply = has_lo & (f_hi > f_lo)
+
+        x = (freqs - f_lo[..., None]) / (f_hi - f_lo)[..., None]
+        w = planck_taper_fall(xp.where(apply[..., None], x, -1.0), xp=xp)
+        amp *= w
+
     @property
     def waveform_gen(self) -> callable:
         """C/CUDA wrapped function for computing waveforms"""
@@ -355,6 +382,7 @@ class BBHWaveformFD(BBHxParallelModule):
         length=None,
         modes=None,
         shift_t_limits=True,
+        t_obs_end_taper=None,
         direct=False,
         compress=True,
         squeeze=False,
@@ -385,6 +413,16 @@ class BBHWaveformFD(BBHxParallelModule):
             t_obs_end (double, optional): End time of observation in years in the
                 LISA constellation reference frame. This is with reference to :math:`t=0`.
                 (Default: 1.0)
+            t_obs_end_taper (double, optional): If given (years, same frame as
+                ``t_obs_end`` and before it), each harmonic's amplitude is tapered to
+                zero in the frequency domain instead of being cut off at ``t_obs_end``:
+                a Planck taper, linear in frequency, from where that harmonic's
+                :math:`t_f` reaches ``t_obs_end_taper`` to where it reaches
+                ``t_obs_end``. Harmonics that never reach ``t_obs_end_taper`` are left
+                untapered; ones that reach it but not ``t_obs_end`` taper to the peak
+                of their :math:`t_f`. With the interpolated path, the dense frequencies
+                evaluated then stop where the taper ends, which is the point: content
+                after ``t_obs_end`` is not computed at all. (Default: ``None``)
             freqs (np.ndarray, optional): Frequencies at which to evaluate the final waveform.
                 If ``length`` is also given, the interpolants interpolate to these
                 frequencies. If ``length`` is not given, the waveform amplitude, phase,
@@ -481,6 +519,10 @@ class BBHWaveformFD(BBHxParallelModule):
         t_obs_end_SSB = tSSBfromLframe(t_obs_end_L, lam, beta, 0.0)
         t_start = np.atleast_1d(t_obs_start_SSB)
         t_end = np.atleast_1d(t_obs_end_SSB)
+        if t_obs_end_taper is not None:
+            if not 0.0 < t_obs_end_taper < t_obs_end:
+                raise ValueError("t_obs_end_taper must lie between 0 and t_obs_end.")
+            t_taper = np.atleast_1d(tSSBfromLframe(t_obs_end_taper * YRSID_SI, lam, beta, 0.0))
         
         # check if t_obs_start/end are cupy arrays.
         if (
@@ -527,7 +569,6 @@ class BBHWaveformFD(BBHxParallelModule):
 
         phi_ref_amp_phase = np.zeros_like(m1)
 
-        Tobs = t_end - t_start
         self.amp_phase_gen(
             m1,
             m2,
@@ -541,9 +582,13 @@ class BBHWaveformFD(BBHxParallelModule):
             freqs=freqs_temp,
             out_buffer=out_buffer,
             modes=modes,
-            Tobs=Tobs,
+            t_obs_start=t_start,
+            t_obs_end=t_end,
             direct=direct,
         )
+
+        if t_obs_end_taper is not None:
+            self._taper_harmonics(out_buffer, t_taper, t_end)
 
         # setup buffer to carry around all the quantities of interest
         # params are amp, phase, tf, transferL1re, transferL1im, transferL2re, transferL2im, transferL3re, transferL3im

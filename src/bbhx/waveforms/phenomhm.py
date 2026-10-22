@@ -27,6 +27,7 @@ from ..utils.interpolate import CubicSplineInterpolant, searchsorted2d_vec
 from ..utils.constants import *
 from ..waveforms.ringdownphenomd import *
 from ..utils.parallelbase import BBHxParallelModule
+from ..utils.timefrequency import first_crossing_frequency
 
 
 class PhenomHMAmpPhase(BBHxParallelModule):
@@ -516,104 +517,58 @@ class PhenomHMAmpPhase(BBHxParallelModule):
             self.xp.asarray(t_ref)[:, None, None], (1, self.num_modes, self.length)
         ).flatten()
 
-    def __call__(self, *args, Tobs=None, direct=False, **kwargs):
+    def __call__(self, *args, Tobs=None, t_obs_start=None, t_obs_end=None, direct=False, **kwargs):
+        """Generate the waveform; when interpolating, refit the sparse grid to the observation.
+
+        Args:
+            Tobs (double or np.ndarray, optional): Legacy end of observation in seconds,
+                with the observation taken to start at :math:`t=0`. Ignored if
+                ``t_obs_start``/``t_obs_end`` are given.
+            t_obs_start (np.ndarray, optional): Start of observation for each binary
+                (SSB seconds, absolute, like ``t_ref``).
+            t_obs_end (np.ndarray, optional): End of observation for each binary
+                (SSB seconds, absolute). Non-positive values mean no end.
+            direct (bool, optional): If ``False``, the sparse frequency grid is refit so
+                that each harmonic spans only the observation: from where its
+                :math:`t_f` first rises through the start to where it first rises
+                through the end.
+
+        """
 
         self.run_wave(*args, **kwargs)
 
         # interpolating. Need to adjust frequency bounds
         if not direct:
-            # TODO: must check if this is accurate enough!!!!!!!
-
-            # PURPOSE: NEED TO REMOVE FREQUENCIES WHERE ORBIT INFO DOES NOT EXIST
-            # get start of available information
-
-            fix = self.tf.min(axis=-1) < 0.0
-            f_min = self.freqs_shaped.min(axis=-1)
-
-            if self.xp.any(fix):
-                windows_of_interest = self.xp.argwhere(
-                    (0.0 < self.tf[fix, 1:]) & (0.0 > self.tf[fix, :-1])
-                )
-
-                if windows_of_interest.shape[0] != fix.sum():
-                    raise ValueError(
-                        "The search for a window at x_min did not run correctly. If t_ref is close to zero, the time-frequency correspondence may be crossing zero twice."
-                    )
-
-                # linear interp for minimum frequency
-                segment_inds = windows_of_interest[:, 1]
-
-                y1 = self.xp.take_along_axis(
-                    self.freqs_shaped[fix], segment_inds[:, None], axis=-1
-                )[:, 0]
-                y2 = self.xp.take_along_axis(
-                    self.freqs_shaped[fix], segment_inds[:, None] + 1, axis=-1
-                )[:, 0]
-                x1 = self.xp.take_along_axis(
-                    self.tf[fix], segment_inds[:, None], axis=-1
-                )[:, 0]
-                x2 = self.xp.take_along_axis(
-                    self.tf[fix], segment_inds[:, None] + 1, axis=-1
-                )[:, 0]
-
-                m = (y2 - y1) / (x2 - x1)
-                b = y1
-
-                f_min_new = m * (0.0 - x1) + b
-                f_min[fix] = f_min_new
-
-            if Tobs is None:
-                # will default to tf bound
-                Tobs = self.xp.full((self.num_bin_all, self.num_modes), 1e300)
-            elif isinstance(Tobs, float):
-                Tobs = self.xp.full((self.num_bin_all, self.num_modes), Tobs)
-            elif isinstance(Tobs, np.ndarray) and Tobs.ndim == 1:
-                assert Tobs.shape[0] == self.num_bin_all
-                Tobs = self.xp.repeat(
-                    self.xp.asarray(Tobs)[:, None], self.num_modes, axis=-1
-                )
-            elif isinstance(Tobs, np.ndarray) and Tobs.ndim == 2:
-                Tobs = self.xp.asarray(Tobs)
-                assert Tobs.shape == (self.num_bin_all, self.num_modes)
+            # Remove frequencies outside the observation (and where orbit
+            # information does not exist, before t = 0).
+            if t_obs_start is None and t_obs_end is None:
+                t_lo = self.xp.zeros(self.num_bin_all)
+                if Tobs is None:
+                    t_hi = self.xp.full(self.num_bin_all, 1e300)
+                else:
+                    t_hi = self.xp.asarray(np.broadcast_to(np.asarray(Tobs, dtype=float), (self.num_bin_all,)))
             else:
-                raise ValueError("Tobs entered incorrectly.")
+                t_lo = self.xp.maximum(self.xp.asarray(np.atleast_1d(t_obs_start), dtype=float), 0.0)
+                t_hi = self.xp.asarray(np.atleast_1d(t_obs_end), dtype=float)
+                t_hi = self.xp.where(t_hi > 0.0, t_hi, 1e300)
+            t_lo = self.xp.broadcast_to(t_lo[:, None], (self.num_bin_all, self.num_modes))
+            t_hi = self.xp.broadcast_to(t_hi[:, None], (self.num_bin_all, self.num_modes))
 
-            fix = self.tf.max(axis=-1) > Tobs
-            f_max = self.freqs_shaped.max(axis=-1)
-
+            f_min = self.freqs_shaped.min(axis=-1)
+            fix = self.tf[..., 0] < t_lo
             if self.xp.any(fix):
-                windows_of_interest = self.xp.argwhere(
-                    (Tobs[fix][:, None] < self.tf[fix, 1:])
-                    & (Tobs[fix][:, None] > self.tf[fix, :-1])
-                )
-
-                if windows_of_interest.shape[0] != fix.sum():
+                f_new, found = first_crossing_frequency(self.freqs_shaped, self.tf, t_lo, xp=self.xp)
+                if self.xp.any(fix & ~found):
                     raise ValueError(
-                        "The search for a window at x_max did not run correctly. If t_ref is close to the observation time, the time-frequency correspondence may be crossing zero twice."
+                        "A harmonic starts before t_obs_start but its t-f track never reaches it."
                     )
+                f_min = self.xp.where(fix, f_new, f_min)
 
-                # linear interp for minimum frequency
-                segment_inds = windows_of_interest[:, 1]
-
-                y1 = self.xp.take_along_axis(
-                    self.freqs_shaped[fix], segment_inds[:, None], axis=-1
-                )[:, 0]
-                y2 = self.xp.take_along_axis(
-                    self.freqs_shaped[fix], segment_inds[:, None] + 1, axis=-1
-                )[:, 0]
-                x1 = self.xp.take_along_axis(
-                    self.tf[fix], segment_inds[:, None], axis=-1
-                )[:, 0]
-                x2 = self.xp.take_along_axis(
-                    self.tf[fix], segment_inds[:, None] + 1, axis=-1
-                )[:, 0]
-
-                m = (y2 - y1) / (x2 - x1)
-                b = y1
-
-                f_max_new = m * (Tobs[fix] - x1) + b
-
-                f_max[fix] = f_max_new
+            f_max = self.freqs_shaped.max(axis=-1)
+            fix = self.tf.max(axis=-1) > t_hi
+            if self.xp.any(fix):
+                f_new, found = first_crossing_frequency(self.freqs_shaped, self.tf, t_hi, xp=self.xp)
+                f_max = self.xp.where(fix & found, f_new, f_max)
 
             new_freqs = self.xp.logspace(
                 self.xp.log10(f_min), self.xp.log10(f_max), self.length, axis=-1
